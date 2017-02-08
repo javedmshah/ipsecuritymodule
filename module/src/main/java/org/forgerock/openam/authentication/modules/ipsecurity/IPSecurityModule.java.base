@@ -1,0 +1,182 @@
+/*
+ * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+ *
+ * Copyright (c) 2009 Sun Microsystems Inc. All Rights Reserved
+ *
+ * The contents of this file are subject to the terms
+ * of the Common Development and Distribution License
+ * (the License). You may not use this file except in
+ * compliance with the License.
+ *
+ * You can obtain a copy of the License at
+ * https://opensso.dev.java.net/public/CDDLv1.0.html or
+ * opensso/legal/CDDLv1.0.txt
+ * See the License for the specific language governing
+ * permission and limitations under the License.
+ *
+ * When distributing Covered Code, include this CDDL
+ * Header Notice in each file and include the License file
+ * at opensso/legal/CDDLv1.0.txt.
+ * If applicable, add the following below the CDDL Header,
+ * with the fields enclosed by brackets [] replaced by
+ * your own identifying information:
+ * "Portions Copyrighted [year] [name of copyright owner]"
+ *
+ */
+
+
+package org.forgerock.openam.authentication.modules.ipsecurity;
+
+import com.sun.identity.authentication.spi.AMLoginModule;
+import com.sun.identity.idm.AMIdentity;
+import com.sun.identity.idm.AMIdentityRepository;
+import com.sun.identity.idm.IdRepoException;
+import com.sun.identity.idm.IdSearchControl;
+import com.sun.identity.idm.IdSearchResults;
+import com.sun.identity.idm.IdType;
+import com.sun.identity.shared.debug.Debug;
+
+import javax.servlet.http.HttpServletRequest;
+
+import com.sun.identity.shared.datastruct.CollectionHelper;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Properties;
+
+import com.sun.identity.authentication.util.ISAuthConstants;
+import com.sun.identity.authentication.spi.AuthLoginException;
+
+import javax.security.auth.Subject;
+import javax.security.auth.callback.Callback;
+import javax.security.auth.login.LoginException;
+
+import java.security.Principal;
+import java.util.Collections;
+import java.util.Map;
+import java.util.ResourceBundle;
+import java.util.Set;
+
+
+public class IPSecurityModule extends AMLoginModule {
+
+    private static final String AUTH_MODULE_NAME = "IPSecurityModule";
+    private static final Debug debug = Debug.getInstance(AUTH_MODULE_NAME);
+    // orders defined in the callbacks file
+    private String defaultAnonUser;
+    private HttpServletRequest httpRequestObj = null;
+
+    /**
+     * Constructs an instance of the IPSecurityModule.
+     */
+    public IPSecurityModule() {
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void init(Subject subject, Map sharedState, Map options) {
+
+    	defaultAnonUser = CollectionHelper.getMapAttr(options,
+                "iplanet-am-auth-anonymous-default-user-name");
+       /* System.out.println("\n\n username -> "+userName);
+        System.out.println("\n\n sharedState -> "+sharedState);
+        System.out.println("\n\n options -> "+options);
+        */
+        httpRequestObj = getHttpServletRequest();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public int process(Callback[] callbacks, int state) throws LoginException {
+    	
+    	System.out.println("INSIDE process of IPSecurityModule, state: "+state);
+    			
+    	if (debug.messageEnabled()) {
+    		debug.message("IPSecurity::process state: " + state);
+        }
+    	int nextState = 0;
+         switch (state) {
+         
+             case ISAuthConstants.LOGIN_START: 
+                
+            	 try {
+            		 System.out.println("checking ip");
+            		 Properties prop = new Properties();
+            			InputStream input = null;
+            			String iplist = "127.0.0.1";
+            			try {
+            		 		input = new FileInputStream("/tmp/ipwhitelist.properties");
+            		 
+            				// load a properties file
+            				prop.load(input);
+            				iplist = prop.getProperty("iplist");
+            		 		// get the property value and print it out
+            				if (debug.messageEnabled()) {
+            		    		debug.message("IPSecurity:: IP whitelist: "+iplist);
+            		        }
+            				System.out.println("from file: "+iplist);
+            				String xfwd = getAddressFromRequest(httpRequestObj);
+            				System.out.println("from request obj: "+xfwd);
+            				if(xfwd.equalsIgnoreCase(iplist)) {
+            					nextState =  ISAuthConstants.LOGIN_SUCCEED;
+            					System.out.println("LOGIN SUCCEEDED");
+            					if (debug.messageEnabled()) {
+                		    		debug.message("IPSecurity:: IP is whitelisted !!: "+iplist);
+                		        }
+            				} else {
+            					System.out.println("LOGIN FAILED");
+            					if (debug.messageEnabled()) {
+                		    		debug.message("IPSecurity:: IP is NOT whitelisted !!: "+iplist);
+                		        }
+            					throw new AuthLoginException("invalid IP Address");
+            				}
+            		 
+            			} catch (IOException ex) {
+            				ex.printStackTrace();
+            			} finally {
+            				if (input != null) {
+            					try {
+            						input.close();
+            					} catch (IOException e) {
+            						e.printStackTrace();
+            					}
+            				}
+            			}            		 
+
+
+            			
+            		
+            	 } catch(Exception ex) {
+            		 System.out.println("Exception!! "+ex.getMessage());
+            		 ex.printStackTrace();
+                	 throw new AuthLoginException(ex);
+            	 }
+                 break;
+             default:
+                 throw new AuthLoginException("invalid state");
+  
+         }
+         return nextState;
+    }
+
+    public static String getAddressFromRequest(HttpServletRequest request) {
+        String xfwdFor = request.getHeader("X-Forwarded-For");
+        if (xfwdFor != null)
+            return xfwdFor;
+        return request.getRemoteAddr();
+    }
+    
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public Principal getPrincipal() {
+        return null;
+    }
+
+}
